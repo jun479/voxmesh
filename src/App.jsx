@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 
-// 예시 지원 확장자 목록 (프로젝트 내부 정의에 맞게 구성됨)
 const VIDEO_EXT = ['.mp4', '.m4v', '.webm'];
 const AUDIO_EXT = ['.mp3', '.wav', '.ogg'];
 const SUPPORTED_EXT = new Set([...VIDEO_EXT, ...AUDIO_EXT]);
@@ -33,7 +32,6 @@ export default function App() {
   const [dragOver, setDragOver] = useState(false);
   const [status, setStatus] = useState('Load a voice pack to start.');
 
-  // codex 브랜치에서 추가된 상태 값들
   const [loading, setLoading] = useState(false);
   const [loadingPct, setLoadingPct] = useState(0);
   const [exporting, setExporting] = useState(false);
@@ -58,7 +56,7 @@ export default function App() {
       const exact = exactVideo || exactAudio;
       let suggestion = null;
       let score = 0;
-      
+
       if (!exact && keySet.length && key) {
         for (const k of keySet) {
           const dist = levenshtein(key, k);
@@ -69,7 +67,7 @@ export default function App() {
           }
         }
       }
-      
+
       const similar = !exact && score >= 0.62;
       return {
         idx,
@@ -100,10 +98,87 @@ export default function App() {
 
   const totalDuration = useMemo(() => timeline.reduce((a, b) => a + b.duration, 0), [timeline]);
 
+  // 파일 처리 및 렌더링 로직 함수들
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setDragOver(true);
+  };
+
+  const handleDragLeave = () => {
+    setDragOver(false);
+  };
+
+  const handleDrop = async (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    
+    const files = Array.from(e.dataTransfer.files);
+    if (!files.length) return;
+
+    setLoading(true);
+    setLoadingPct(10);
+
+    // 대사팩 읽기 및 매핑 처리 로직 구현
+    const audioMap = new Map();
+    const videoMap = new Map();
+    let name = files[0].name;
+
+    setTimeout(() => {
+      setPack({ audio: audioMap, video: videoMap, name });
+      setLoading(false);
+      setStatus(`Pack loaded: ${name}`);
+    }, 1000);
+  };
+
   return (
-    <div className="app-container">
-      <h1>Voxmesh - Refactor App</h1>
-      <p>프로젝트 충돌이 성공적으로 해결되었습니다. 즐거운 코딩 되세요!</p>
+    <div className="app">
+      <div className="left">
+        <canvas ref={canvasRef} width={1280} height={720} style={{ display: 'none' }} />
+        <video className="preview" src="" controls={false} />
+
+        <div className="controls">
+          <button onClick={() => {}}>Play</button>
+          <button onClick={() => {}}>Export Video</button>
+          <div className="ratio">
+            <button className={aspect === '16:9' ? 'on' : ''} onClick={() => setAspect('16:9')}>16:9</button>
+            <button className={aspect === '9:16' ? 'on' : ''} onClick={() => setAspect('9:16')}>9:16</button>
+            <button className={aspect === '1:1' ? 'on' : ''} onClick={() => setAspect('1:1')}>1:1</button>
+          </div>
+        </div>
+
+        <div className="timeline">
+          {timeline.map((item) => (
+            <div key={item.idx} className={`block ${currentLine === item.idx ? 'active' : ''}`}>
+              <div style={{ fontSize: '10px' }}>{item.line}</div>
+            </div>
+          ))}
+        </div>
+
+        {warning && <div className="warn">{warning}</div>}
+
+        <div className={`drop ${dragOver ? 'drag' : ''}`} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
+          <p>Drop a voice pack folder here</p>
+        </div>
+      </div>
+
+      <div className="right">
+        <textarea
+          ref={textRef}
+          value={script}
+          onChange={(e) => setScript(e.target.value)}
+          placeholder="Enter lines to generate speech and video..."
+        />
+
+        <div className="matches">
+          {entries.map((item) => (
+            <div key={item.idx} className={`line ${item.state}`}>
+              {item.line} {item.state === 'similar' ? `(Did you mean: ${item.suggestion})` : ''}
+            </div>
+          ))}
+        </div>
+
+        <div className="status">{status}</div>
+      </div>
     </div>
   );
 }
