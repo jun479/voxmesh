@@ -6,7 +6,8 @@ body { margin: 0; font-family: Inter, system-ui, sans-serif; background: #0a0a0a
 .preview { width: 100%; max-height: 58vh; object-fit: contain; border-radius: 12px; background: #000; }
 .controls { display: flex; gap: 8px; flex-wrap: wrap; }
 button { background: #27272a; color: #fff; border: 0; border-radius: 8px; padding: 10px 12px; cursor: pointer; }
-.ratio { display: flex; gap: 4px; } .ratio .on { background: #2563eb; }
+.ratio { display: flex; gap: 4px; }
+.ratio .on { background: #2563eb; }
 .timeline { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 8px; }
 .block { min-width: 80px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: #18181b; border: 1px solid #3f3f46; }
 .block.active { background: #1d4ed8; }
@@ -22,4 +23,9 @@ textarea { flex: 1; min-height: 180px; resize: vertical; border-radius: 12px; bo
 .line.playing { background: #27272a; }
 .status { color: #a1a1aa; font-size: 12px; }
 
-.warn{color:#facc15;background:#422006;padding:8px;border-radius:8px}.line.similar{color:#facc15}.timeline-wrap{display:flex;flex-direction:column;min-width:120px}small{color:#a1a1aa}button:disabled{opacity:.5;cursor:not-allowed}
+/* 24번 줄 충돌 해결 내용 추가 */
+.warn { color: #facc15; background: #422006; padding: 8px; border-radius: 8px; }
+.line.similar { color: #facc15; }
+.timeline-wrap { display: flex; flex-direction: column; min-width: 120px; }
+small { color: #a1a1aa; }
+button:disabled { opacity: .5; cursor: not-allowed; }
