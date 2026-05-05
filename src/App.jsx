@@ -1,333 +1,312 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Play, Pause, Download, FolderOpen, Film, Music, Type, Loader2 } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
-// 유틸리티: 문자열 정규화 (공백 제거 및 소문자화)
-const normalize = (str) => str.replace(/\s+/g, '').toLowerCase();
+const normalizeKey = (value = '') => value.replace(/\s+/g, '').toLowerCase().trim();
+const VIDEO_EXT = new Set(['mp4', 'webm', 'mov', 'm4v']);
+const AUDIO_EXT = new Set(['wav', 'mp3', 'ogg', 'm4a', 'aac', 'flac', 'webm']);
+const SUPPORTED_EXT = new Set([...VIDEO_EXT, ...AUDIO_EXT]);
 
-const App = () => {
-  const [files, setFiles] = useState({ audio: new Map(), video: new Map() });
-  const [script, setScript] = useState("");
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentIndex, setCurrentIndex] = useState(-1);
-  const [aspectRatio, setAspectRatio] = useState('16:9');
-  const [isExporting, setIsExporting] = useState(false);
-  
-  // 로딩 상태 추가
-  const [isLoadingPack, setIsLoadingPack] = useState(false);
-  const [loadingProgress, setLoadingProgress] = useState(0);
-
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const audioContextRef = useRef(null);
-  const requestRef = useRef(null);
-
-  // 폴더 업로드 처리 (로딩 프로그레스 적용)
-  const handleFolderUpload = async (e) => {
-    const uploadedFiles = Array.from(e.target.files);
-    if (uploadedFiles.length === 0) return;
-
-    setIsLoadingPack(true);
-    setLoadingProgress(0);
-
-    const audioMap = new Map();
-    const videoMap = new Map();
-    const total = uploadedFiles.length;
-
-    // 루프를 돌며 비동기로 처리 (UI 업데이트 허용)
-    for (let i = 0; i < total; i++) {
-      const file = uploadedFiles[i];
-      const path = file.webkitRelativePath.toLowerCase();
-      const name = normalize(file.name.split('.')[0]);
-      const url = URL.createObjectURL(file);
-      const data = { url, name: file.name.split('.')[0], blob: file };
-
-      if (path.includes('/audio/')) audioMap.set(name, data);
-      else if (path.includes('/video/')) videoMap.set(name, data);
-
-      // 프로그레스 업데이트
-      const progress = Math.round(((i + 1) / total) * 100);
-      setLoadingProgress(progress);
-
-      // 대량의 파일 처리 시 UI가 얼지 않도록 비동기 틱 추가
-      if (i % 5 === 0) {
-        await new Promise(r => setTimeout(r, 0));
-      }
-    }
-
-    // 완료 전 살짝 대기 (사용자 시각적 경험용)
-    await new Promise(r => setTimeout(r, 400));
-    
-    setFiles({ audio: audioMap, video: videoMap });
-    setIsLoadingPack(false);
-    setLoadingProgress(0);
-  };
-
-  // 대본 라인별 매칭 상태 계산
-  const lines = useMemo(() => script.split('\n').filter(l => l.trim() !== ""), [script]);
-
-  const getMatchStatus = (line) => {
-    const key = normalize(line);
-    if (files.video.has(key) || files.audio.has(key)) return 'exact';
-    const allKeys = [...files.audio.keys(), ...files.video.keys()];
-    if (allKeys.some(k => k.includes(key))) return 'partial';
-    return 'none';
-  };
-
-  // 재생 로직
-  useEffect(() => {
-    if (isPlaying && currentIndex < lines.length) {
-      if (currentIndex === -1) {
-        setCurrentIndex(0);
-        return;
-      }
-      playClip(currentIndex);
-    } else if (currentIndex >= lines.length) {
-      setIsPlaying(false);
-      setCurrentIndex(-1);
-    }
-  }, [isPlaying, currentIndex]);
-
-  const playClip = (index) => {
-    const text = lines[index];
-    const key = normalize(text);
-    const clip = files.video.get(key) || files.audio.get(key);
-
-    if (!clip) {
-      setTimeout(() => setCurrentIndex(prev => prev + 1), 500);
-      return;
-    }
-
-    const isVideo = files.video.has(key);
-    const media = document.createElement(isVideo ? 'video' : 'audio');
-    media.src = clip.url;
-    
-    media.onloadedmetadata = () => {
-      media.play();
-      renderToCanvas(media, isVideo, clip.name);
-    };
-
-    media.onended = () => {
-      setCurrentIndex(prev => prev + 1);
-    };
-  };
-
-  const renderToCanvas = (media, isVideo, label) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    
-    const draw = () => {
-      if (media.paused || media.ended) return;
-
-      ctx.fillStyle = isVideo ? '#000' : '#1e3a8a';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      if (isVideo) {
-        const vRatio = media.videoWidth / media.videoHeight;
-        const cRatio = canvas.width / canvas.height;
-        let nw, nh, nx, ny;
-        if (vRatio > cRatio) {
-          nw = canvas.width;
-          nh = canvas.width / vRatio;
-          nx = 0;
-          ny = (canvas.height - nh) / 2;
-        } else {
-          nh = canvas.height;
-          nw = canvas.height * vRatio;
-          nx = (canvas.width - nw) / 2;
-          ny = 0;
-        }
-        ctx.drawImage(media, nx, ny, nw, nh);
-      }
-
-      ctx.font = 'bold 40px Sans-serif';
-      ctx.textAlign = 'center';
-      ctx.strokeStyle = 'black';
-      ctx.lineWidth = 6;
-      ctx.strokeText(label, canvas.width / 2, canvas.height - 50);
-      ctx.fillStyle = 'white';
-      ctx.fillText(label, canvas.width / 2, canvas.height - 50);
-
-      requestRef.current = requestAnimationFrame(draw);
-    };
-    draw();
-  };
-
-  const handleExport = async () => {
-    if (lines.length === 0) return;
-    setIsExporting(true);
-    
-    const canvas = canvasRef.current;
-    const stream = canvas.captureStream(30);
-    const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
-    const chunks = [];
-
-    recorder.ondataavailable = e => chunks.push(e.data);
-    recorder.onstop = () => {
-      const blob = new Blob(chunks, { type: 'video/webm' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'zorius_meme.webm';
-      a.click();
-      setIsExporting(false);
-    };
-
-    recorder.start();
-    setIsPlaying(true);
-    setCurrentIndex(0);
-
-    const checkEnd = setInterval(() => {
-      if (currentIndex >= lines.length - 1) {
-        setTimeout(() => {
-          recorder.stop();
-          clearInterval(checkEnd);
-        }, 1000);
-      }
-    }, 500);
-  };
-
-  return (
-    <div className="flex h-screen bg-zinc-950 text-zinc-100 overflow-hidden">
-      {/* 왼쪽: 프리뷰 영역 */}
-      <div className="w-7/12 flex flex-col border-r border-zinc-800 p-6 space-y-4">
-        <div className="flex justify-between items-center">
-          <h1 className="text-xl font-bold flex items-center gap-2">
-            <Film className="text-blue-500" /> Meme Video Maker
-          </h1>
-          <div className="flex gap-2">
-            <button 
-              onClick={() => setAspectRatio('16:9')}
-              className={`px-3 py-1 text-xs rounded ${aspectRatio === '16:9' ? 'bg-blue-600' : 'bg-zinc-800'}`}
-            >16:9</button>
-            <button 
-              onClick={() => setAspectRatio('9:16')}
-              className={`px-3 py-1 text-xs rounded ${aspectRatio === '9:16' ? 'bg-blue-600' : 'bg-zinc-800'}`}
-            >9:16</button>
-          </div>
-        </div>
-
-        <div className="relative flex-1 bg-black rounded-xl overflow-hidden shadow-2xl flex items-center justify-center">
-          <canvas 
-            ref={canvasRef}
-            width={aspectRatio === '16:9' ? 1280 : 720}
-            height={aspectRatio === '16:9' ? 720 : 1280}
-            className="max-w-full max-h-full object-contain"
-          />
-          
-          {/* 로딩 오버레이 */}
-          {isLoadingPack && (
-            <div className="absolute inset-0 bg-black/80 backdrop-blur-md z-50 flex flex-col items-center justify-center p-8 transition-opacity duration-300">
-              <Loader2 className="animate-spin text-blue-500 mb-4" size={40} />
-              <h2 className="text-lg font-bold mb-6">Loading Voice Pack...</h2>
-              <div className="w-full max-w-md h-3 bg-zinc-800 rounded-full overflow-hidden mb-2 shadow-inner">
-                <div 
-                  className="h-full bg-blue-500 transition-all duration-300 ease-out"
-                  style={{ width: `${loadingProgress}%` }}
-                />
-              </div>
-              <span className="text-blue-400 font-mono font-bold text-xl">{loadingProgress}%</span>
-            </div>
-          )}
-
-          {!isPlaying && currentIndex === -1 && !isLoadingPack && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm">
-              <Film size={48} className="text-zinc-500 mb-2" />
-              <p className="text-zinc-400">보이스 팩을 로드하고 재생을 시작하세요</p>
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center gap-4 bg-zinc-900 p-4 rounded-xl">
-          <button 
-            onClick={() => setIsPlaying(!isPlaying)}
-            disabled={files.audio.size === 0 && files.video.size === 0 || isLoadingPack}
-            className="p-4 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 rounded-full transition-all"
-          >
-            {isPlaying ? <Pause fill="white" /> : <Play fill="white" />}
-          </button>
-          
-          <div className="flex-1">
-            <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-blue-500 transition-all duration-300" 
-                style={{ width: `${((currentIndex + 1) / lines.length) * 100}%` }}
-              />
-            </div>
-            <p className="text-[10px] mt-2 text-zinc-500 uppercase tracking-widest">Timeline Progress</p>
-          </div>
-
-          <button 
-            onClick={handleExport}
-            disabled={isExporting || lines.length === 0 || isLoadingPack}
-            className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-700 rounded-lg font-bold transition-all"
-          >
-            <Download size={18} /> {isExporting ? 'Exporting...' : 'Export'}
-          </button>
-        </div>
-      </div>
-
-      {/* 오른쪽: 편집 영역 */}
-      <div className="w-5/12 flex flex-col p-6 bg-zinc-900/50">
-        <div className="mb-6 space-y-4">
-          <label className={`group flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-zinc-700 hover:border-blue-500 rounded-xl bg-zinc-900 transition-all ${isLoadingPack ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
-            <div className="flex flex-col items-center justify-center pt-5 pb-6">
-              <FolderOpen className={`group-hover:text-blue-500 mb-2 ${isLoadingPack ? 'text-zinc-700' : 'text-zinc-500'}`} />
-              <p className="text-sm text-zinc-400">Voice Pack 폴더 선택</p>
-              <p className="text-xs text-zinc-600 mt-1">audio/ video/ 폴더가 포함되어야 함</p>
-            </div>
-            <input 
-              type="file" 
-              webkitdirectory="" 
-              directory="" 
-              className="hidden" 
-              onChange={handleFolderUpload} 
-              disabled={isLoadingPack}
-            />
-          </label>
-          
-          <div className="flex gap-4 text-xs">
-            <div className="flex items-center gap-1.5 text-zinc-400">
-              <Music size={14} /> Audio: <span className="text-white font-bold">{files.audio.size}</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-zinc-400">
-              <Film size={14} /> Video: <span className="text-white font-bold">{files.video.size}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex-1 flex flex-col min-h-0">
-          <h3 className="text-sm font-bold text-zinc-500 mb-2 flex items-center gap-2">
-            <Type size={16} /> SCRIPT EDITOR
-          </h3>
-          <div className="flex-1 bg-zinc-950 rounded-xl p-4 overflow-y-auto border border-zinc-800 focus-within:border-blue-500/50 transition-all">
-            <textarea
-              className="w-full h-full bg-transparent outline-none resize-none font-mono text-lg leading-relaxed"
-              placeholder="여기에 대사를 입력하세요..."
-              value={script}
-              onChange={(e) => setScript(e.target.value)}
-              disabled={isLoadingPack}
-            />
-          </div>
-          
-          {/* 하단 실시간 매칭 상태바 */}
-          <div className="mt-4 grid grid-cols-1 gap-2 overflow-y-auto max-h-40 p-2 bg-black/30 rounded-lg">
-            {lines.map((line, i) => (
-              <div key={i} className="flex items-center gap-3 text-sm">
-                <span className={`w-2 h-2 rounded-full shrink-0 ${
-                  getMatchStatus(line) === 'exact' ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : 
-                  getMatchStatus(line) === 'partial' ? 'bg-amber-500' : 'bg-rose-500'
-                }`} />
-                <span className={`truncate ${i === currentIndex ? 'text-blue-400 font-bold' : 'text-zinc-400'}`}>
-                  {line}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+// Added: Levenshtein-based fuzzy scoring for smart matching.
+const levenshtein = (a, b) => {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++) {
+    const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+    dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+  }
+  return dp[m][n];
 };
+
+function App() {
+  const [pack, setPack] = useState({ audio: new Map(), video: new Map(), name: '' });
+  const [script, setScript] = useState('');
+  const [aspect, setAspect] = useState('16:9');
+  const [playing, setPlaying] = useState(false);
+  const [currentLine, setCurrentLine] = useState(-1);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [dragOver, setDragOver] = useState(false);
+  const [status, setStatus] = useState('Load a voice pack to start.');
+  const [loading, setLoading] = useState(false);
+  const [loadingPct, setLoadingPct] = useState(0);
+  const [exporting, setExporting] = useState(false);
+  const [warning, setWarning] = useState('');
+  const [recentPackInfo, setRecentPackInfo] = useState(null);
+
+  const canvasRef = useRef(null);
+  const textRef = useRef(null);
+  const audioCtxRef = useRef(null);
+  const engineRef = useRef(null);
+  const mediaCacheRef = useRef(new Map());
+  const audioBufferCacheRef = useRef(new Map());
+
+  const lines = useMemo(() => script.split('\n').map((s) => s.trim()).filter(Boolean), [script]);
+  const keySet = useMemo(() => [...pack.audio.keys(), ...pack.video.keys()], [pack]);
+
+  const entries = useMemo(() => lines.map((line, idx) => {
+    const key = normalizeKey(line);
+    const exactVideo = pack.video.get(key);
+    const exactAudio = pack.audio.get(key);
+    const exact = exactVideo || exactAudio;
+    let suggestion = null;
+    let score = 0;
+    if (!exact && keySet.length && key) {
+      for (const k of keySet) {
+        const dist = levenshtein(key, k);
+        const sim = 1 - dist / Math.max(key.length, k.length, 1);
+        if (sim > score) { score = sim; suggestion = k; }
+      }
+    }
+    const similar = !exact && score >= 0.62;
+    return { idx, line, key, exactVideo, exactAudio, exact, score, suggestion, state: exact ? 'exact' : similar ? 'similar' : 'none' };
+  }), [lines, pack, keySet]);
+
+  const timeline = useMemo(() => entries.map((item) => ({ ...item, duration: item.exact?.duration || item.exactVideo?.duration || item.exactAudio?.duration || 1.2 })), [entries]);
+  const totalDuration = useMemo(() => timeline.reduce((a, b) => a + b.duration, 0), [timeline]);
+
+  useEffect(() => {
+    const loadRecent = async () => {
+      const db = await openDB();
+      const tx = db.transaction('packs', 'readonly');
+      const req = tx.objectStore('packs').get('last-pack');
+      req.onsuccess = () => setRecentPackInfo(req.result || null);
+    };
+    loadRecent().catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (currentLine >= 0) textRef.current?.querySelector(`[data-line='${currentLine}']`)?.scrollIntoView({ block: 'nearest' });
+  }, [currentLine]);
+
+  useEffect(() => {
+    const c = canvasRef.current; if (!c) return;
+    const [w, h] = aspect === '16:9' ? [1280, 720] : [720, 1280]; c.width = w; c.height = h;
+    const ctx = c.getContext('2d'); ctx.fillStyle = '#09090b'; ctx.fillRect(0, 0, w, h);
+  }, [aspect]);
+
+  const openDB = () => new Promise((resolve, reject) => {
+    const req = indexedDB.open('voxmesh-db', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('packs', { keyPath: 'id' });
+    req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
+  });
+
+  const savePackMetadata = async (audioMap, videoMap, name, manifest = null) => {
+    const db = await openDB();
+    const tx = db.transaction('packs', 'readwrite');
+    tx.objectStore('packs').put({ id: 'last-pack', name, updatedAt: Date.now(), counts: { audio: audioMap.size, video: videoMap.size }, manifest });
+  };
+
+  const clearCaches = () => {
+    mediaCacheRef.current.forEach((m) => m.remove?.());
+    mediaCacheRef.current.clear();
+    audioBufferCacheRef.current.clear();
+  };
+
+  const preloadAudioBuffer = async (asset, ctx) => {
+    const key = asset.key;
+    if (audioBufferCacheRef.current.has(key)) return audioBufferCacheRef.current.get(key);
+    const arr = await asset.file.arrayBuffer();
+    const buf = await ctx.decodeAudioData(arr.slice(0));
+    audioBufferCacheRef.current.set(key, buf);
+    return buf;
+  };
+
+  const getVideoElement = (asset) => {
+    if (mediaCacheRef.current.has(asset.key)) return mediaCacheRef.current.get(asset.key);
+    const v = document.createElement('video');
+    v.src = asset.url; v.preload = 'auto'; v.crossOrigin = 'anonymous'; v.playsInline = true; v.muted = true;
+    mediaCacheRef.current.set(asset.key, v);
+    return v;
+  };
+
+  const buildPackFromFiles = async (files, name = 'Local Pack') => {
+    setLoading(true); setLoadingPct(1); setWarning('');
+    clearCaches();
+    const audio = new Map(); const video = new Map(); let unsupported = 0; let manifest = null;
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]; const path = (file.webkitRelativePath || file.name).toLowerCase();
+      const ext = file.name.split('.').pop()?.toLowerCase(); const base = normalizeKey(file.name.replace(/\.[^.]+$/, ''));
+      if (file.name.toLowerCase() === 'manifest.json') { manifest = await file.text().catch(() => null); continue; }
+      if (!SUPPORTED_EXT.has(ext)) { unsupported++; continue; }
+      const asset = { key: base, label: file.name.replace(/\.[^.]+$/, ''), file, url: URL.createObjectURL(file), duration: 1.2 };
+      if (path.includes('/audio/') || AUDIO_EXT.has(ext)) audio.set(base, asset);
+      if (path.includes('/video/') || VIDEO_EXT.has(ext)) video.set(base, asset);
+      setLoadingPct(Math.round(((i + 1) / files.length) * 100));
+      if (i % 8 === 0) await new Promise((r) => setTimeout(r, 0));
+    }
+
+    const preloadCtx = new (window.AudioContext || window.webkitAudioContext)();
+    for (const a of audio.values()) {
+      const buf = await preloadAudioBuffer(a, preloadCtx);
+      a.duration = buf.duration || 1.2;
+    }
+    for (const v of video.values()) {
+      const el = getVideoElement(v);
+      await new Promise((r) => { el.onloadedmetadata = r; el.onerror = r; });
+      v.duration = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : 1.2;
+    }
+    preloadCtx.close();
+
+    setPack({ audio, video, name });
+    await savePackMetadata(audio, video, name, manifest).catch(() => {});
+    setRecentPackInfo({ name, counts: { audio: audio.size, video: video.size }, updatedAt: Date.now() });
+    setStatus(`Loaded ${name}: ${audio.size} audio, ${video.size} video.`);
+    if (unsupported) setWarning(`${unsupported} unsupported files were ignored.`);
+    setLoading(false); setLoadingPct(100);
+  };
+
+  const drawSubtitle = (ctx, text) => {
+    const c = canvasRef.current; const y = c.height - 56;
+    ctx.font = 'bold 40px sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 7;
+    ctx.strokeStyle = '#000'; ctx.strokeText(text, c.width / 2, y); ctx.fillStyle = '#fff'; ctx.fillText(text, c.width / 2, y);
+  };
+  const drawContainVideo = (ctx, media) => {
+    const c = canvasRef.current; const vw = media.videoWidth || 1; const vh = media.videoHeight || 1;
+    const ratio = vw / vh; const cr = c.width / c.height; let dw = c.width, dh = c.height, dx = 0, dy = 0;
+    if (ratio > cr) { dh = c.width / ratio; dy = (c.height - dh) / 2; } else { dw = c.height * ratio; dx = (c.width - dw) / 2; }
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(media, dx, dy, dw, dh);
+  };
+
+  // Added: gapless scheduler with absolute AudioContext times.
+  const playFrom = async (startIndex = 0) => {
+    if (!timeline.length || loading || exporting) return;
+    stopEngine();
+    const ctx = canvasRef.current.getContext('2d');
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    audioCtxRef.current = audioCtx;
+    const startAt = audioCtx.currentTime + 0.08;
+    const state = { stop: false, audioCtx, startAt, startIndex, stopAt: startAt + timeline.slice(startIndex).reduce((a, b) => a + b.duration, 0), sources: [] };
+    engineRef.current = state; setPlaying(true);
+
+    let cursor = startAt;
+    for (let i = startIndex; i < timeline.length; i++) {
+      const item = timeline[i];
+      const audioClip = item.exactAudio || pack.audio.get(item.key);
+      if (audioClip) {
+        const b = audioBufferCacheRef.current.get(audioClip.key) || await preloadAudioBuffer(audioClip, audioCtx);
+        const src = audioCtx.createBufferSource(); const gain = audioCtx.createGain(); gain.gain.value = 0.96;
+        src.buffer = b; src.connect(gain); gain.connect(audioCtx.destination); src.start(cursor); state.sources.push(src);
+      }
+      cursor += item.duration;
+    }
+
+    const tick = async () => {
+      if (!engineRef.current || engineRef.current.stop) return;
+      const elapsed = Math.max(0, audioCtx.currentTime - startAt);
+      setCurrentTime(elapsed);
+      let acc = 0; let activeIdx = -1;
+      for (let i = startIndex; i < timeline.length; i++) {
+        const d = timeline[i].duration; if (elapsed >= acc && elapsed < acc + d) { activeIdx = i; break; } acc += d;
+      }
+      setCurrentLine(activeIdx);
+      if (activeIdx >= 0) {
+        const item = timeline[activeIdx];
+        if (item.exactVideo) {
+          const v = getVideoElement(item.exactVideo);
+          const localStart = Math.max(0, elapsed - acc);
+          if (Math.abs(v.currentTime - localStart) > 0.2) v.currentTime = localStart;
+          await v.play().catch(() => {});
+          drawContainVideo(ctx, v);
+        } else { ctx.fillStyle = '#166534'; ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height); }
+        drawSubtitle(ctx, item.line);
+      }
+      if (audioCtx.currentTime >= state.stopAt) { stopEngine(true); return; }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  };
+
+  const stopEngine = (ended = false) => {
+    const e = engineRef.current; if (!e) return;
+    e.stop = true; e.sources.forEach((s) => { try { s.stop(); } catch {} });
+    audioCtxRef.current?.close?.(); engineRef.current = null; audioCtxRef.current = null;
+    if (ended) { setCurrentLine(-1); setCurrentTime(0); }
+    setPlaying(false);
+  };
+
+  const exportWebm = async () => {
+    if (!timeline.length || exporting) return;
+    setExporting(true);
+    const stream = canvasRef.current.captureStream(30);
+    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus' : 'video/webm';
+    const rec = new MediaRecorder(stream, { mimeType: mime });
+    const chunks = [];
+    rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    const done = new Promise((resolve) => rec.onstop = resolve);
+    rec.start(250);
+    await playFrom(0);
+    await new Promise((r) => setTimeout(r, (totalDuration + 0.35) * 1000)); // Added: duration-safe stop.
+    stopEngine(true);
+    rec.stop();
+    await done;
+    const blob = new Blob(chunks, { type: mime });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'meme_video.webm'; a.click();
+    setExporting(false);
+  };
+
+  const encodeWav = (buffer) => { /* unchanged */
+    const ch = buffer.numberOfChannels, len = buffer.length * ch * 2 + 44, out = new ArrayBuffer(len), v = new DataView(out);
+    const write = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+    write(0, 'RIFF'); v.setUint32(4, 36 + buffer.length * ch * 2, true); write(8, 'WAVEfmt '); v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true); v.setUint16(22, ch, true); v.setUint32(24, buffer.sampleRate, true); v.setUint32(28, buffer.sampleRate * ch * 2, true);
+    v.setUint16(32, ch * 2, true); v.setUint16(34, 16, true); write(36, 'data'); v.setUint32(40, buffer.length * ch * 2, true);
+    let o = 44; for (let i = 0; i < buffer.length; i++) for (let c = 0; c < ch; c++) { const s = Math.max(-1, Math.min(1, buffer.getChannelData(c)[i])); v.setInt16(o, s < 0 ? s * 0x8000 : s * 0x7fff, true); o += 2; }
+    return new Blob([out], { type: 'audio/wav' });
+  };
+
+  const renderOfflineMix = async () => {
+    const ac = new OfflineAudioContext(2, 48000 * Math.ceil(totalDuration + 1), 48000); let offset = 0;
+    for (const item of timeline) {
+      const clip = item.exactAudio || pack.audio.get(item.key);
+      if (clip) { const arr = await clip.file.arrayBuffer(); const buf = await ac.decodeAudioData(arr.slice(0)); const src = ac.createBufferSource(); src.buffer = buf; src.connect(ac.destination); src.start(offset); }
+      offset += item.duration;
+    }
+    return ac.startRendering();
+  };
+
+  const exportWav = async () => {
+    const rendered = await renderOfflineMix();
+    const blob = encodeWav(rendered); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'meme_audio.wav'; a.click();
+  };
+
+  const exportMp3 = async () => {
+    try {
+      const rendered = await renderOfflineMix();
+      const lamejs = await import('https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js'); // optional advanced path
+      const left = rendered.getChannelData(0); const right = rendered.numberOfChannels > 1 ? rendered.getChannelData(1) : left;
+      const to16 = (f32) => Int16Array.from(f32.map((s) => Math.max(-1, Math.min(1, s)) * 32767));
+      const mp3enc = new lamejs.Mp3Encoder(2, rendered.sampleRate, 128); const block = 1152; const mp3Data = [];
+      const l = to16(left), r = to16(right);
+      for (let i = 0; i < l.length; i += block) mp3Data.push(mp3enc.encodeBuffer(l.subarray(i, i + block), r.subarray(i, i + block)));
+      mp3Data.push(mp3enc.flush());
+      const blob = new Blob(mp3Data, { type: 'audio/mp3' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'meme_audio.mp3'; a.click();
+    } catch {
+      setWarning('MP3 encoder could not be loaded. Please retry online.');
+    }
+  };
+
+  return <div className="app"><div className="left">
+    <canvas ref={canvasRef} className="preview" />
+    <div className="controls">
+      <button disabled={loading || exporting} onClick={() => (playing ? stopEngine() : playFrom(currentLine > 0 ? currentLine : 0))}>{playing ? '⏸ Pause' : '▶ Play'}</button>
+      <div className="ratio"><button className={aspect === '16:9' ? 'on' : ''} onClick={() => setAspect('16:9')}>16:9</button><button className={aspect === '9:16' ? 'on' : ''} onClick={() => setAspect('9:16')}>9:16</button></div>
+      <button disabled={loading || exporting} onClick={exportWebm}>{exporting ? 'Exporting...' : 'Export WEBM'}</button>
+      <button disabled={loading || exporting} onClick={exportMp3}>Export MP3</button>
+      <button disabled={loading || exporting} onClick={exportWav}>Export WAV</button>
+    </div>
+    <div className="timeline">{timeline.map((t, i) => <div key={i} className="timeline-wrap" draggable onDragStart={(e) => e.dataTransfer.setData('idx', i)} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { const from = Number(e.dataTransfer.getData('idx')); const next = [...lines]; const [mv] = next.splice(from, 1); next.splice(i, 0, mv); setScript(next.join('\n')); }}><button className={`block ${i === currentLine ? 'active' : ''}`} style={{ flex: `${Math.max(1, t.duration)}` }} onClick={() => { setCurrentLine(i); if (playing) playFrom(i); }}>{t.line}</button><small>{t.duration.toFixed(2)}s</small></div>)}</div>
+    <div className="status">{status} · {currentTime.toFixed(2)}s/{totalDuration.toFixed(2)}s {loading ? ` · Loading ${loadingPct}%` : ''}</div>
+    {warning ? <div className="warn">{warning}</div> : null}
+  </div>
+  <div className="right">
+    <label className={`drop ${dragOver ? 'drag' : ''}`} onDragOver={(e) => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={async (e) => { e.preventDefault(); setDragOver(false); await buildPackFromFiles(Array.from(e.dataTransfer.files)); }}>
+      <input disabled={loading || exporting} type="file" webkitdirectory="" multiple onChange={(e) => buildPackFromFiles(Array.from(e.target.files || []))} />
+      <b>Load voice pack folder</b><small>Drag & drop or click (audio/, video/, manifest.json)</small>
+      {recentPackInfo ? <small>Previous pack: {recentPackInfo.name} ({recentPackInfo.counts?.audio || 0} audio / {recentPackInfo.counts?.video || 0} video)</small> : null}
+    </label>
+    <textarea disabled={loading || exporting} value={script} onChange={(e) => setScript(e.target.value)} placeholder="Each line = one clip" />
+    <div className="matches" ref={textRef}>{entries.map((e, i) => <div key={i} data-line={i} className={`line ${e.state} ${i === currentLine ? 'playing' : ''}`}>{e.line}{e.state === 'similar' && e.suggestion ? <em> → {e.suggestion} ({Math.round(e.score * 100)}%)</em> : null}</div>)}</div>
+  </div></div>;
+}
 
 export default App;
