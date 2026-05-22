@@ -1,13 +1,16 @@
 import React, { useRef } from 'react';
-import { normalize } from '../utils/textUtils';
+import { Search, ShieldCheck } from 'lucide-react';
+import { normalize, getChosung } from '../utils/textUtils';
 
 const Editor = ({ script, setScript, files, currentIndex, isPlaying }) => {
     const highlightRef = useRef(null);
+    const textareaRef = useRef(null);
 
     const handleScroll = (e) => {
         if (highlightRef.current) highlightRef.current.scrollTop = e.target.scrollTop;
     };
 
+    // 1. 하이라이트 매칭 엔진
     const lines = script.split('\n');
     let matchedCount = 0;
 
@@ -27,11 +30,40 @@ const Editor = ({ script, setScript, files, currentIndex, isPlaying }) => {
 
             return (
                 <React.Fragment key={index}>
-                    <span className={finalClass}>{line}</span>
+                    <span className={finalClass}>{line || ' '}</span>
                     <br />
                 </React.Fragment>
             );
         });
+    };
+
+    // 2. 실시간 단어 추천 엔진
+    const lastWord = script.split(/\s+/).pop() || "";
+    const searchKey = normalize(lastWord);
+    const searchChosung = getChosung(searchKey);
+    const recommendations = [];
+
+    if (searchKey.length > 0) {
+        const checkMap = (map, type) => {
+            if (!map) return;
+            for (const [key, val] of map.entries()) {
+                if (key.includes(searchKey) || getChosung(key).includes(searchChosung)) {
+                    recommendations.push({ name: val.name, type });
+                }
+                if (recommendations.length > 15) break; 
+            }
+        };
+        checkMap(files.video, 'video');
+        checkMap(files.audio, 'audio');
+    }
+
+    const applyRecommendation = (name) => {
+        const words = script.trimEnd().split(/\s+/);
+        words.pop(); // 치고 있던 단어 날리기
+        // 추천어 적용 후 엔터(줄바꿈)를 넣어주면 라인 매칭 시스템에서 매우 편해집니다.
+        const newScript = (words.length > 0 ? words.join(' ') + '\n' : '') + name + '\n';
+        setScript(newScript);
+        if (textareaRef.current) textareaRef.current.focus();
     };
 
     return (
@@ -49,12 +81,11 @@ const Editor = ({ script, setScript, files, currentIndex, isPlaying }) => {
             </div>
             
             <div className="flex-1 relative overflow-hidden">
-                {/* 하이라이트 레이어 */}
                 <div ref={highlightRef} className="absolute inset-0 p-8 whitespace-pre-wrap break-words malgun text-[22px] leading-[1.8] pointer-events-none tracking-tight overflow-y-auto text-transparent">
                     {renderHighlight()}
                 </div>
-                {/* 실제 입력창 */}
                 <textarea 
+                    ref={textareaRef}
                     value={script}
                     onChange={(e) => setScript(e.target.value)}
                     onScroll={handleScroll}
@@ -63,13 +94,16 @@ const Editor = ({ script, setScript, files, currentIndex, isPlaying }) => {
                 ></textarea>
             </div>
 
-            {/* MATCH STATUS BOTTOM BAR */}
-            <div className="p-4 bg-[#0F0F0F] border-t border-[#1F1F1F] text-[10px] font-bold text-[#444] select-none">
-                <div className="italic">
-                    {script.trim() === "" 
-                        ? "텍스트를 입력하면 분석 리스트가 여기에 맵핑됩니다." 
-                        : `총 ${lines.length}줄 중 ${matchedCount}줄 매칭 성공 (매칭률: ${Math.round((matchedCount/lines.length)*100 || 0)}%)`
-                    }
+            {/* 추천 바 UI 원본 복구 */}
+            <div className="p-4 bg-[#0F0F0F] border-t border-[#1F1F1F] overflow-x-auto scrollbar-hide">
+                <div className="flex gap-2 min-w-max pb-2">
+                    {recommendations.length === 0 && <span className="text-[10px] text-[#444] italic">추천 파일이 여기에 표시됩니다. (총 {lines.length}줄 중 {matchedCount}줄 매칭)</span>}
+                    {recommendations.map((rec, i) => (
+                        <button key={i} onClick={() => applyRecommendation(rec.name)} className="px-3 py-1.5 rounded-lg bg-[#1A1A1A] border border-[#262626] text-[11px] font-bold hover:border-white transition-all flex items-center gap-2 text-[#E0E0E0]">
+                            {rec.type === 'audio' ? <ShieldCheck size={12} className="text-[#a4c2f4]" /> : <Search size={12} className="text-[#a2c4c9]" />}
+                            {rec.name}
+                        </button>
+                    ))}
                 </div>
             </div>
         </div>
