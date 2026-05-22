@@ -1,28 +1,27 @@
 import React from 'react';
-import { Loader2, Film } from 'lucide-react';
+import { Play, Square, Download, FileVideo } from 'lucide-react';
 
-export default function Monitor({ canvasRef, aspectRatio, isLoadingPack, loadingProgress, isPlaying, currentIndex }) {
+const Monitor = ({ canvasRef, isPlaying, isExporting, onPlayPause, onExport }) => {
     return (
-        <div className="relative flex-1 bg-black rounded-xl overflow-hidden shadow-2xl border border-[#1F1F1F] flex items-center justify-center">
-            <canvas
-                ref={canvasRef}
-                width={aspectRatio === '16:9' ? 1280 : 720}
-                height={aspectRatio === '16:9' ? 720 : 1280}
-                className="max-w-full max-h-full object-contain"
-            />
-
-            {isLoadingPack && (
-                <div className="absolute inset-0 bg-black/90 z-50 flex flex-col items-center justify-center">
-                    <Loader2 className="animate-spin text-white mb-4" size={32} />
-                    <p className="text-xs uppercase tracking-widest text-[#666666]">{loadingProgress}% Synchronized</p>
-                </div>
-            )}
-
-            {!isPlaying && currentIndex === -1 && !isLoadingPack && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-10">
-                    <Film size={60} strokeWidth={1} className="text-white" />
-                </div>
-            )}
+        <div className="flex flex-col gap-4">
+            <div className="relative aspect-video bg-black rounded-xl overflow-hidden border border-[#262626] shadow-2xl flex items-center justify-center">
+                <canvas ref={canvasRef} width="1280" height="720" className="w-full h-full object-contain"></canvas>
+                {!isPlaying && !isExporting && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm z-10">
+                        <span className="text-white/30 font-bold tracking-widest">VOXMESH ENGINE</span>
+                    </div>
+                )}
+            </div>
+            
+            <div className="flex gap-2 justify-center">
+                <button onClick={onPlayPause} disabled={isExporting} className="p-4 rounded-xl bg-[#1A1A1A] hover:bg-[#262626] border border-[#333] transition-all">
+                    {isPlaying ? <Square size={24} className="text-red-500" /> : <Play size={24} className="text-white" />}
+                </button>
+                <button onClick={onExport} disabled={isExporting || isPlaying} className="p-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 flex items-center gap-2">
+                    {isExporting ? <span className="animate-pulse">내보내는 중...</span> : <><Download size={24} /> Export</>}
+                </button>
+            </div>
         </div>
     );
-}
+};
+export default Monitor;
