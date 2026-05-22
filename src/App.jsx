@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useVoicePack } from './hooks/useVoicePack';
 import { useExport } from './hooks/useExport';
 import { normalize } from './utils/textUtils';
@@ -16,75 +16,111 @@ const App = () => {
     const [currentIndex, setCurrentIndex] = useState(-1);
     
     const canvasRef = useRef(null);
+    const requestRef = useRef(null);
     const lines = script.split('\n');
 
-    // 입력된 텍스트(대사)와 업로드된 음성팩 파일을 매칭하는 로직
-    const allFileKeys = useMemo(() => {
-        const keys = [
-            ...Array.from(files.scripts?.keys() || []), 
-            ...Array.from(files.video?.keys() || []), 
-            ...Array.from(files.audio?.keys() || [])
-        ];
-        return [...new Set(keys)].sort((a, b) => b.length - a.length);
-    }, [files]);
-
+    // 라인 단위 매칭 토큰 생성
     const matchedTokens = useMemo(() => {
-        let remaining = script;
-        const tokens = [];
-        while (remaining.length > 0) {
-            let found = false;
-            for (const key of allFileKeys) {
-                if (normalize(remaining).startsWith(key)) {
-                    const originalMatch = remaining.substring(0, remaining.toLowerCase().indexOf(key) + key.length);
-                    let source = "none", clip = null;
-                    if (files.scripts?.has(key)) { source = "script"; clip = files.scripts.get(key); }
-                    else if (files.video?.has(key)) { source = "video"; clip = files.video.get(key); }
-                    else if (files.audio?.has(key)) { source = "audio"; clip = files.audio.get(key); }
-                    
-                    tokens.push({ text: originalMatch, source, clip });
-                    remaining = remaining.substring(originalMatch.length);
-                    found = true; break;
-                }
-            }
-            if (!found) { 
-                tokens.push({ text: remaining[0], source: "none" }); 
-                remaining = remaining.substring(1); 
-            }
-        }
-        return tokens;
-    }, [script, allFileKeys, files]);
+        return lines.map(line => {
+            const key = normalize(line);
+            let source = "none", clip = null;
+            if (files.video?.has(key)) { source = "video"; clip = files.video.get(key); }
+            else if (files.audio?.has(key)) { source = "audio"; clip = files.audio.get(key); }
+            return { text: line, source, clip };
+        });
+    }, [lines, files]);
 
-    // 캔버스 렌더링 로직
+    // 캔버스 실시간 렌더링 루프
     const renderToCanvas = useCallback((media, isVideo, text) => {
         const canvas = canvasRef.current;
         if (!canvas) return;
         const ctx = canvas.getContext('2d');
         
-        ctx.fillStyle = 'black'; 
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        if (isVideo) {
-            const vRatio = media.videoWidth / media.videoHeight;
-            const cRatio = canvas.width / canvas.height;
-            let nw, nh, nx, ny;
-            if (vRatio > cRatio) { nw = canvas.width; nh = canvas.width / vRatio; nx = 0; ny = (canvas.height - nh) / 2; }
-            else { nh = canvas.height; nw = canvas.height * vRatio; nx = (canvas.width - nw) / 2; ny = 0; }
-            ctx.drawImage(media, nx, ny, nw, nh);
-        }
-        
-        if (showSubtitles && text) {
-            ctx.font = '700 36px "Malgun Gothic", sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillStyle = 'white';
-            ctx.shadowBlur = 10;
-            ctx.shadowColor = 'black';
-            ctx.fillText(text, canvas.width / 2, canvas.height - 60);
-            ctx.shadowBlur = 0;
-        }
+        const draw = () => {
+            if (media.paused || media.ended) return; // 재생 끝나면 붓 내려놓기
+            
+            ctx.fillStyle = 'black'; 
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            if (isVideo) {
+                const vRatio = media.videoWidth / media.videoHeight;
+                const cRatio = canvas.width / canvas.height;
+                let nw, nh, nx, ny;
+                if (vRatio > cRatio) { nw = canvas.width; nh = canvas.width / vRatio; nx = 0; ny = (canvas.height - nh) / 2; }
+                else { nh = canvas.height; nw = canvas.height * vRatio; nx = (canvas.width - nw) / 2; ny = 0; }
+                ctx.drawImage(media, nx, ny, nw, nh);
+            }
+            
+            if (showSubtitles && text) {
+                ctx.font = '700 36px "Malgun Gothic", sans-serif';
+                ctx.textAlign = 'center'; ctx.fillStyle = 'white';
+                ctx.shadowBlur = 10; ctx.shadowColor = 'black';
+                ctx.fillText(text, canvas.width / 2, canvas.height - 60);
+                ctx.shadowBlur = 0;
+            }
+            requestRef.current = requestAnimationFrame(draw);
+        };
+        draw();
     }, [showSubtitles]);
 
-    // 에러가 발생했던 부분 수정 완료 (matchedTokens 전달)
     const { isExporting, handleExport } = useExport(canvasRef, matchedTokens, packInfo.name, renderToCanvas);
+
+    // 🚀 핵심 재생 모터 🚀
+    useEffect(() => {
+        let isCancelled = false;
+
+        const playSequence = async () => {
+            if (!isPlaying || isExporting) return;
+
+            if (currentIndex >= matchedTokens.length) {
+                setIsPlaying(false);
+                setCurrentIndex(-1);
+                return;
+            }
+
+            if (currentIndex === -1) {
+                setCurrentIndex(0);
+                return;
+            }
+
+            const token = matchedTokens[currentIndex];
+
+            if (token.source === "none" || !token.clip?.file) {
+                await new Promise(r => setTimeout(r, 100)); // 매칭 안된 라인은 0.1초만에 스킵
+                if (!isCancelled) setCurrentIndex(prev => prev + 1);
+                return;
+            }
+
+            const isVideo = token.source !== "audio";
+            const media = document.createElement(isVideo ? 'video' : 'audio');
+            const objectUrl = URL.createObjectURL(token.clip.file);
+            media.src = objectUrl;
+
+            await new Promise((resolve) => {
+                media.onloadedmetadata = () => {
+                    media.play().catch(console.warn);
+                    renderToCanvas(media, isVideo, token.text);
+                };
+                media.onended = () => {
+                    URL.revokeObjectURL(objectUrl);
+                    resolve();
+                };
+                media.onerror = () => {
+                    URL.revokeObjectURL(objectUrl);
+                    resolve();
+                };
+            });
+
+            if (!isCancelled) setCurrentIndex(prev => prev + 1);
+        };
+
+        playSequence();
+
+        return () => {
+            isCancelled = true;
+            if (requestRef.current) cancelAnimationFrame(requestRef.current);
+        };
+    }, [isPlaying, isExporting, currentIndex, matchedTokens, renderToCanvas]);
 
     return (
         <div className="overflow-hidden p-6 font-['Noto_Sans_KR'] selection:bg-zinc-800 bg-[#0A0A0A] text-[#E0E0E0] h-screen box-border">
