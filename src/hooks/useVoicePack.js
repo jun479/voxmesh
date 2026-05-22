@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { normalize, VOICE_PACK_DATABASE } from '../utils/core';
+import { normalize, VOICE_PACK_DATABASE } from '../utils/textUtils';
 
 export const useVoicePack = () => {
     const [files, setFiles] = useState({ audio: new Map(), video: new Map(), scripts: new Map() });
@@ -13,7 +13,7 @@ export const useVoicePack = () => {
 
         const firstPath = uploadedFiles[0].webkitRelativePath || uploadedFiles[0].name;
         const rootFolderName = firstPath.split('/')[0];
-        
+
         let detectedName = "Unknown", detectedVersion = "0.0.0", detectedAvatar = null;
         Object.keys(VOICE_PACK_DATABASE).forEach(key => { if (rootFolderName.includes(key)) detectedName = key; });
         const vMatch = rootFolderName.match(/(\d+\.\d+\.\d+)/);
@@ -30,16 +30,16 @@ export const useVoicePack = () => {
             const nameKey = normalize(fileNameRaw);
 
             if (['png', 'jpg', 'jpeg'].includes(ext) && (pathLower.split('/').length <= 2 || fileNameRaw === 'profile')) {
-                detectedAvatar = URL.createObjectURL(file); // 아바타만 예외 허용
+                detectedAvatar = URL.createObjectURL(file);
             }
 
-            const data = { file, name: fileNameRaw }; // Lazy Loading을 위해 file 원본 저장
+            const data = { file, name: fileNameRaw };
             if (pathLower.includes('/대사/')) scriptMap.set(nameKey, { ...data, folder: '대사' });
             else if (pathLower.includes('/video/')) videoMap.set(nameKey, { ...data, folder: 'video' });
             else if (pathLower.includes('/audio/')) audioMap.set(nameKey, { ...data, folder: 'audio' });
 
             setLoadingProgress(Math.round(((i + 1) / total) * 100));
-            if (i % 100 === 0) await new Promise(r => setTimeout(r, 0)); // 메인 스레드 락다운 방지
+            if (i % 100 === 0) await new Promise(r => setTimeout(r, 0));
         }
 
         setPackInfo({ name: detectedName, version: detectedVersion, rawFolderName: rootFolderName, avatar: detectedAvatar });

@@ -1,184 +1,127 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
+import Monitor from './components/Monitor';
+import SourcePanel from './components/SourcePanel';
+import Editor from './components/Editor';
+import { useVoicePack } from './hooks/useVoicePack';
+import { useExport } from './hooks/useExport';
+import { normalize, levenshtein, drawFrame } from './utils/textUtils';
 
-const VIDEO_EXT = ['.mp4', '.m4v', '.webm'];
-const AUDIO_EXT = ['.mp3', '.wav', '.ogg'];
-const SUPPORTED_EXT = new Set([...VIDEO_EXT, ...AUDIO_EXT]);
-
-const levenshtein = (a, b) => {
-  const m = a.length, n = b.length;
-  const dp = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
-  for (let i = 0; i <= m; i++) dp[i][0] = i;
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
-    }
-  }
-  return dp[m][n];
-};
-
-function normalizeKey(str) {
-  return str.trim().toLowerCase();
-}
+const VIDEO_EXT = new Set(['.mp4', '.m4v', '.webm']);
+const AUDIO_EXT = new Set(['.mp3', '.wav', '.ogg']);
 
 export default function App() {
-  const [pack, setPack] = useState({ audio: new Map(), video: new Map(), name: '' });
-  const [script, setScript] = useState('');
-  const [aspect, setAspect] = useState('16:9');
-  const [playing, setPlaying] = useState(false);
-  const [currentLine, setCurrentLine] = useState(-1);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [dragOver, setDragOver] = useState(false);
-  const [status, setStatus] = useState('Load a voice pack to start.');
+    const [script, setScript] = useState('');
+    const [aspect, setAspect] = useState('16:9');
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [currentIndex, setCurrentIndex] = useState(-1);
+    const [showSubtitles, setShowSubtitles] = useState(true);
 
-  const [loading, setLoading] = useState(false);
-  const [loadingPct, setLoadingPct] = useState(0);
-  const [exporting, setExporting] = useState(false);
-  const [warning, setWarning] = useState('');
-  const [recentPackInfo, setRecentPackInfo] = useState(null);
+    const canvasRef = useRef(null);
+    const { files, isLoadingPack, loadingProgress, packInfo, handleFiles } = useVoicePack();
+    const { isExporting, handleExport } = useExport(canvasRef, packInfo);
 
-  const canvasRef = useRef(null);
-  const textRef = useRef(null);
-  const audioCtxRef = useRef(null);
-  const engineRef = useRef(null);
-  const mediaCacheRef = useRef(new Map());
-  const audioBufferCacheRef = useRef(new Map());
+    const keySet = useMemo(() => [...files.audio.keys(), ...files.video.keys(), ...files.scripts.keys()], [files]);
 
-  const lines = useMemo(() => script.split('\n').map((s) => s.trim()).filter(Boolean), [script]);
-  const keySet = useMemo(() => [...pack.audio.keys(), ...pack.video.keys()], [pack]);
+    const matchedTokens = useMemo(() => {
+        return script.split(/(\s+)/).map((token) => {
+            if (/^\s+$/.test(token)) return { text: token, source: 'space', clip: null };
+            const key = normalize(token);
+            if (files.scripts.has(key)) return { text: token, source: 'script', clip: files.scripts.get(key) };
+            if (files.video.has(key))   return { text: token, source: 'video',  clip: files.video.get(key) };
+            if (files.audio.has(key))   return { text: token, source: 'audio',  clip: files.audio.get(key) };
 
-  const entries = useMemo(() => {
-    return lines.map((line, idx) => {
-      const key = normalizeKey(line);
-      const exactVideo = pack.video.get(key);
-      const exactAudio = pack.audio.get(key);
-      const exact = exactVideo || exactAudio;
-      let suggestion = null;
-      let score = 0;
+            // 퍼지 매칭
+            let best = null, bestScore = 0;
+            for (const k of keySet) {
+                const dist = levenshtein(key, k);
+                const sim = 1 - dist / Math.max(key.length, k.length, 1);
+                if (sim > bestScore) { bestScore = sim; best = k; }
+            }
+            if (bestScore >= 0.62 && best) {
+                const clip = files.scripts.get(best) || files.video.get(best) || files.audio.get(best);
+                return { text: token, source: 'fuzzy', clip };
+            }
+            return { text: token, source: 'none', clip: null };
+        });
+    }, [script, files, keySet]);
 
-      if (!exact && keySet.length && key) {
-        for (const k of keySet) {
-          const dist = levenshtein(key, k);
-          const sim = 1 - dist / Math.max(key.length, k.length, 1);
-          if (sim > score) {
-            score = sim;
-            suggestion = k;
-          }
+    // 재생 로직
+    const playNext = (index) => {
+        if (!isPlaying || index >= matchedTokens.length) {
+            setIsPlaying(false); setCurrentIndex(-1); return;
         }
-      }
+        const token = matchedTokens[index];
+        setCurrentIndex(index);
+        if (token.source === 'none' || token.source === 'space' || !token.clip?.file) {
+            setTimeout(() => playNext(index + 1), token.source === 'space' ? 0 : 100);
+            return;
+        }
+        const isVideo = token.source !== 'audio';
+        const media = document.createElement(isVideo ? 'video' : 'audio');
+        const url = URL.createObjectURL(token.clip.file);
+        media.src = url;
+        media.onloadedmetadata = () => {
+            media.play();
+            const loop = () => {
+                if (canvasRef.current)
+                    drawFrame(canvasRef.current.getContext('2d'), media, isVideo, token.text, canvasRef.current, showSubtitles);
+                if (!media.paused && !media.ended) requestAnimationFrame(loop);
+            };
+            loop();
+        };
+        media.onended = () => { URL.revokeObjectURL(url); playNext(index + 1); };
+    };
 
-      const similar = !exact && score >= 0.62;
-      return {
-        idx,
-        line,
-        key,
-        exactVideo,
-        exactAudio,
-        exact,
-        score,
-        suggestion,
-        state: exact ? 'exact' : similar ? 'similar' : 'none',
-      };
-    });
-  }, [lines, pack, keySet]);
+    const handlePlay = () => {
+        if (isPlaying) { setIsPlaying(false); setCurrentIndex(-1); return; }
+        setIsPlaying(true);
+        playNext(0);
+    };
 
-  const timeline = useMemo(
-    () =>
-      entries.map((item) => ({
-        ...item,
-        duration:
-          item.exact?.duration ||
-          item.exactVideo?.duration ||
-          item.exactAudio?.duration ||
-          1.2,
-      })),
-    [entries]
-  );
+    return (
+        <div className="app">
+            {/* 좌측: 미리보기 + 컨트롤 */}
+            <div className="left">
+                <Monitor
+                    canvasRef={canvasRef}
+                    aspectRatio={aspect}
+                    isLoadingPack={isLoadingPack}
+                    loadingProgress={loadingProgress}
+                    isPlaying={isPlaying}
+                    currentIndex={currentIndex}
+                />
 
-  const totalDuration = useMemo(() => timeline.reduce((a, b) => a + b.duration, 0), [timeline]);
+                <div className="controls">
+                    <button onClick={handlePlay}>{isPlaying ? '정지' : '재생'}</button>
+                    <button
+                        onClick={() => handleExport(matchedTokens, setCurrentIndex, setIsPlaying)}
+                        disabled={isExporting}
+                    >
+                        {isExporting ? '내보내는 중...' : '내보내기'}
+                    </button>
+                    <button onClick={() => setShowSubtitles(v => !v)}>
+                        자막 {showSubtitles ? 'ON' : 'OFF'}
+                    </button>
+                    <div className="ratio">
+                        {['16:9', '9:16', '1:1'].map(r => (
+                            <button key={r} className={aspect === r ? 'on' : ''} onClick={() => setAspect(r)}>{r}</button>
+                        ))}
+                    </div>
+                </div>
 
-  // 파일 처리 및 렌더링 로직 함수들
-  const handleDragOver = (e) => {
-    e.preventDefault();
-    setDragOver(true);
-  };
-
-  const handleDragLeave = () => {
-    setDragOver(false);
-  };
-
-  const handleDrop = async (e) => {
-    e.preventDefault();
-    setDragOver(false);
-    
-    const files = Array.from(e.dataTransfer.files);
-    if (!files.length) return;
-
-    setLoading(true);
-    setLoadingPct(10);
-
-    // 대사팩 읽기 및 매핑 처리 로직 구현
-    const audioMap = new Map();
-    const videoMap = new Map();
-    let name = files[0].name;
-
-    setTimeout(() => {
-      setPack({ audio: audioMap, video: videoMap, name });
-      setLoading(false);
-      setStatus(`Pack loaded: ${name}`);
-    }, 1000);
-  };
-
-  return (
-    <div className="app">
-      <div className="left">
-        <canvas ref={canvasRef} width={1280} height={720} style={{ display: 'none' }} />
-        <video className="preview" src="" controls={false} />
-
-        <div className="controls">
-          <button onClick={() => {}}>Play</button>
-          <button onClick={() => {}}>Export Video</button>
-          <div className="ratio">
-            <button className={aspect === '16:9' ? 'on' : ''} onClick={() => setAspect('16:9')}>16:9</button>
-            <button className={aspect === '9:16' ? 'on' : ''} onClick={() => setAspect('9:16')}>9:16</button>
-            <button className={aspect === '1:1' ? 'on' : ''} onClick={() => setAspect('1:1')}>1:1</button>
-          </div>
-        </div>
-
-        <div className="timeline">
-          {timeline.map((item) => (
-            <div key={item.idx} className={`block ${currentLine === item.idx ? 'active' : ''}`}>
-              <div style={{ fontSize: '10px' }}>{item.line}</div>
+                <SourcePanel packInfo={packInfo} handleFiles={handleFiles} />
             </div>
-          ))}
-        </div>
 
-        {warning && <div className="warn">{warning}</div>}
-
-        <div className={`drop ${dragOver ? 'drag' : ''}`} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
-          <p>Drop a voice pack folder here</p>
-        </div>
-      </div>
-
-      <div className="right">
-        <textarea
-          ref={textRef}
-          value={script}
-          onChange={(e) => setScript(e.target.value)}
-          placeholder="Enter lines to generate speech and video..."
-        />
-
-        <div className="matches">
-          {entries.map((item) => (
-            <div key={item.idx} className={`line ${item.state}`}>
-              {item.line} {item.state === 'similar' ? `(Did you mean: ${item.suggestion})` : ''}
+            {/* 우측: 에디터 */}
+            <div className="right">
+                <Editor
+                    script={script}
+                    setScript={setScript}
+                    files={files}
+                    matchedTokens={matchedTokens}
+                    currentIndex={currentIndex}
+                />
             </div>
-          ))}
         </div>
-
-        <div className="status">{status}</div>
-      </div>
-    </div>
-  );
+    );
 }

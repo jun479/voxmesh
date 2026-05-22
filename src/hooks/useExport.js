@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { drawFrame } from '../utils/core';
+import { drawFrame } from '../utils/textUtils';
 
 export const useExport = (canvasRef, packInfo) => {
     const [isExporting, setIsExporting] = useState(false);
@@ -7,15 +7,15 @@ export const useExport = (canvasRef, packInfo) => {
     const handleExport = async (matchedTokens, setCurrentIndex, setIsPlaying) => {
         if (matchedTokens.length === 0 || isExporting) return;
         setIsExporting(true); setIsPlaying(true);
-        
+
         const canvas = canvasRef.current;
         const canvasStream = canvas.captureStream(30);
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         const audioDest = audioCtx.createMediaStreamDestination();
-        
+
         const combinedStream = new MediaStream([...canvasStream.getVideoTracks(), ...audioDest.stream.getAudioTracks()]);
         const recorder = new MediaRecorder(combinedStream, { mimeType: 'video/webm;codecs=vp9' });
-        
+
         const chunks = [];
         recorder.ondataavailable = e => chunks.push(e.data);
         recorder.onstop = () => {
@@ -35,18 +35,18 @@ export const useExport = (canvasRef, packInfo) => {
             if (token.source === "none" || !token.clip || !token.clip.file) {
                 await new Promise(r => setTimeout(r, 100)); continue;
             }
-            
+
             await new Promise((resolve) => {
                 const isVideo = token.source !== "audio";
                 const media = document.createElement(isVideo ? 'video' : 'audio');
-                
+
                 const objectUrl = URL.createObjectURL(token.clip.file);
                 media.src = objectUrl; media.crossOrigin = "anonymous";
-                
+
                 const sourceNode = audioCtx.createMediaElementSource(media);
                 sourceNode.connect(audioDest); sourceNode.connect(audioCtx.destination);
 
-                media.onloadedmetadata = () => { 
+                media.onloadedmetadata = () => {
                     media.play();
                     const loop = () => {
                         drawFrame(canvas.getContext('2d'), media, isVideo, token.text, canvas, true);
@@ -56,7 +56,7 @@ export const useExport = (canvasRef, packInfo) => {
                 };
                 media.onended = () => {
                     sourceNode.disconnect();
-                    URL.revokeObjectURL(objectUrl); // 즉각 파기
+                    URL.revokeObjectURL(objectUrl);
                     resolve();
                 };
                 media.onerror = resolve;
