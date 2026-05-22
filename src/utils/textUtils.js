@@ -10,3 +10,9 @@ export const getChosung = (str) => {
     }
     return result;
 };
+
+export const VOICE_PACK_DATABASE = {};
+
+export const drawFrame = () => {
+    console.log("drawFrame placeholder");
+};
