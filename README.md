@@ -1,4 +1,6 @@
 # Voxmesh
+<img width="1343" height="851" alt="image" src="https://github.com/user-attachments/assets/3ce766bd-8dcb-4144-ac8f-970ac2248616" />
+
 
 > [!IMPORTANT]
 > Voxmesh는 AI TTS 프로젝트가 아닙니다.
