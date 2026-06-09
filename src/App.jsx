@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useVoicePack } from './hooks/useVoicePack';
 import { useExport } from './hooks/useExport';
-import { normalize } from './utils/textUtils';
+import { normalize, splitMatchLine } from './utils/textUtils';
 
 import Monitor from './components/Monitor';
 import SourcePanel from './components/SourcePanel';
@@ -19,14 +19,16 @@ const App = () => {
     const requestRef = useRef(null);
     const lines = script.split('\n');
 
-    // 라인 단위 매칭 토큰 생성
+    // 라인 단위 매칭 토큰 생성 (음절 분리 매칭 지원)
     const matchedTokens = useMemo(() => {
-        return lines.map(line => {
-            const key = normalize(line);
-            let source = "none", clip = null;
-            if (files.video?.has(key)) { source = "video"; clip = files.video.get(key); }
-            else if (files.audio?.has(key)) { source = "audio"; clip = files.audio.get(key); }
-            return { text: line, source, clip };
+        return lines.flatMap(line => {
+            const segments = splitMatchLine(line, files.audio, files.video);
+            return segments.map(seg => ({
+                text: line,        // 자막은 원본 줄 전체
+                source: seg.type,  // 'video' | 'audio' | 'none'
+                clip: seg.clip,
+                segText: seg.text  // 실제 재생할 세그먼트 텍스트
+            }));
         });
     }, [lines, files]);
 
@@ -37,7 +39,7 @@ const App = () => {
         const ctx = canvas.getContext('2d');
         
         const draw = () => {
-            if (media.paused || media.ended) return; // 재생 끝나면 붓 내려놓기
+            if (media.paused || media.ended) return;
             
             ctx.fillStyle = 'black'; 
             ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -86,7 +88,7 @@ const App = () => {
             const token = matchedTokens[currentIndex];
 
             if (token.source === "none" || !token.clip?.file) {
-                await new Promise(r => setTimeout(r, 100)); // 매칭 안된 라인은 0.1초만에 스킵
+                await new Promise(r => setTimeout(r, 100));
                 if (!isCancelled) setCurrentIndex(prev => prev + 1);
                 return;
             }
