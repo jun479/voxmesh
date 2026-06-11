@@ -1,5 +1,4 @@
 # Voxmesh
-[https://docs.google.com/presentation/d/e/2PACX-1vRiLb5SIZb1l66Qz4rwgRvuDT4jfLVOUMmEeJCqRs_K2O0TDZSTMcsSOEeFoRzy4zt0LpS5e1SenY5d/pub?start=false&loop=false&delayms=3000](https://docs.google.com/document/d/1uuXe34cvl5cyCkvOanDLcSLTNMpPX5_KAQLQNq_zY9g/edit?usp=sharing)
 > [!IMPORTANT]
 > Voxmesh는 AI TTS 프로젝트가 아닙니다.
 >
